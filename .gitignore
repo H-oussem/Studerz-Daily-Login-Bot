@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.env
+.env
+.venv
+env/
+venv/
+
+# Screenshots & debugging artifacts
+*.png
+*.jpg
+*.jpeg
+screenshot.png
+failure-screenshot/
+logs.txt
+*.log
+
+# Sensitive configuration files
+config.json
+secrets.json
+
+# IDE
+.vscode/
+.idea/

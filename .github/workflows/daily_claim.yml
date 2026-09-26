@@ -1,0 +1,41 @@
+name: Studerz Daily Claim
+
+on:
+  schedule:
+    # 07:00 UTC = 08:00 AM Sfax Time (UTC+1)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Allows manual testing
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium --with-deps
+
+      - name: Run the bot
+        env:
+          BOT_EMAIL: ${{ secrets.BOT_EMAIL }}
+          BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+        run: python bot.py
+
+      # This step only runs if the 'Run the bot' step fails
+      - name: Upload Screenshot on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-screenshot
+          path: screenshot.png
