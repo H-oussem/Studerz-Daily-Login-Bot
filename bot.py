@@ -3,6 +3,11 @@ import sys
 import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright
+try:
+    from playwright_stealth import Stealth
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
 
 # Fetching secrets from environment variables
 EMAIL = os.getenv("BOT_EMAIL")
@@ -26,6 +31,51 @@ def validate_environment():
         print("Please configure them in your repository settings under Secrets > Actions.")
         sys.exit(1)
 
+def handle_cloudflare_challenge(page):
+    """Detects and attempts to pass Cloudflare Turnstile / security verification if presented."""
+    try:
+        title = page.title().lower()
+        content = page.content().lower()
+        if "just a moment" in title or "security verification" in content or "verify you are human" in content:
+            print("🛡️ Cloudflare security challenge detected. Attempting verification...")
+            for attempt in range(8):
+                if page.query_selector("#email") is not None:
+                    print("✅ Successfully passed Cloudflare challenge!")
+                    return True
+
+                # Search frames for the checkbox
+                for frame in page.frames:
+                    try:
+                        checkbox = frame.locator("input[type='checkbox'], .ctp-checkbox-label, #challenge-stage")
+                        if checkbox.count() > 0:
+                            print("Clicking Cloudflare Turnstile checkbox...")
+                            checkbox.first.click()
+                            page.wait_for_timeout(3000)
+                            break
+                    except Exception:
+                        pass
+                
+                # Main frame iframe fallback
+                try:
+                    cf_iframe = page.locator("iframe[src*='challenges.cloudflare.com']")
+                    if cf_iframe.count() > 0:
+                        box = cf_iframe.first.bounding_box()
+                        if box:
+                            print("Clicking Turnstile iframe region...")
+                            page.mouse.click(box["x"] + 30, box["y"] + (box["height"] / 2))
+                            page.wait_for_timeout(3000)
+                except Exception:
+                    pass
+
+                page.wait_for_timeout(2000)
+
+            if page.query_selector("#email") is not None:
+                print("✅ Successfully passed Cloudflare challenge!")
+                return True
+    except Exception as e:
+        print(f"Notice while checking Cloudflare challenge: {e}")
+    return False
+
 def run_bot():
     validate_environment()
     
@@ -35,6 +85,9 @@ def run_bot():
     print(f"Target URL: {URL}")
 
     with sync_playwright() as p:
+        if HAS_STEALTH:
+            Stealth().use_sync(p)
+
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -49,7 +102,7 @@ def run_bot():
             viewport={"width": 1280, "height": 800}
         )
         
-        # Prevent Cloudflare / anti-bot scripts from detecting webdriver
+        # Prevent anti-bot scripts from detecting webdriver
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         page = context.new_page()
@@ -62,7 +115,9 @@ def run_bot():
                 print(f"🔗 Step 1: Navigating to {URL}...")
                 page.goto(URL, timeout=60000, wait_until="domcontentloaded")
                 
-                # Check for Cloudflare challenge or DNS errors early
+                # Check for Cloudflare challenge or DNS errors
+                handle_cloudflare_challenge(page)
+                
                 page_title = page.title()
                 if "Error 1016" in page_title or "Origin DNS error" in page_title:
                     raise RuntimeError("Site is currently down (Cloudflare Error 1016: Origin DNS error).")
